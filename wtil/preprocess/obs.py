@@ -14,8 +14,7 @@ from wtil.api.wt_pb2 import (
     RLMovingState,
     RLRangedWeapon,
 )
-from wtil.utils.obs_utils import split_obs
-from wtil.utils.process_utils import encode_bool, encode_onehot, encode_ratio, encode_vector3d
+from wtil.preprocess.utils import encode_bool, encode_onehot, encode_ratio, encode_vector3d
 
 MaxHealth = 1000
 MaxHealthPotion = 10.0
@@ -50,6 +49,12 @@ MAX_VALID_ACTION_LENGTH = 4
 
 DATA_N = 25 + 6 + MaxHealth + int(MaxStamina / 10) + MaxHealthPotion + 3 + 3 + 3 + 10 + 75 + 88
 OBS_N = int(DATA_N * 2)
+
+
+def split_obs(obs: ObservationData) -> Tuple[RLAIData, List[RLAIData]]:
+    for i in range(len(obs.AIData)):
+        if obs.AIData[i].EpisodeId == obs.EpisodeId:
+            return obs.AIData[i], obs.AIData[:i] + obs.AIData[i:]
 
 
 def process_obs(obs_list: List[ObservationData]) -> List[Tuple[RLAIData, List[RLAIData]]]:

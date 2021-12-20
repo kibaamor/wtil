@@ -7,10 +7,10 @@ import torch
 from google.protobuf.json_format import Parse
 
 from wtil.api.wt_pb2 import ActionData, ObservationData, PlayerObservationData
+from wtil.preprocess.act import encode_act
+from wtil.preprocess.obs import encode_obs, process_obs
 from wtil.utils.dataset import DirDataset, ProcessFn
 from wtil.utils.logger import config_logger
-from wtil.utils.process_act import encode_act
-from wtil.utils.process_obs import encode_obs, process_obs
 
 ObsProcessor = Callable[[List[ObservationData]], List[Any]]
 ObsEncoder = Callable[[List[Any], List[ActionData], int], Any]

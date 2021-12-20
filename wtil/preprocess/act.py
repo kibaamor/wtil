@@ -3,7 +3,7 @@ from typing import Any, List, Sequence, Tuple
 from numpy import int32
 
 from wtil.api.wt_pb2 import ActionData, RLAIData
-from wtil.utils.process_utils import encode_vector3d_ratio
+from wtil.preprocess.utils import encode_vector3d_ratio
 
 ACTION_NUM = 22
 DIRECTION_NUM = 2

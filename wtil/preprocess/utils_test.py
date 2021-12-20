@@ -1,7 +1,7 @@
 import numpy as np
 from assertpy import assert_that
 
-from wtil.utils.process_utils import calc_vector2d_ratio
+from wtil.preprocess.utils import calc_vector2d_ratio
 
 
 def test_calc_vector2d_ratio():

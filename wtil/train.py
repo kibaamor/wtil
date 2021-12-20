@@ -2,99 +2,153 @@
 import logging
 import os
 import pathlib
+from typing import Any, Callable
 
 import torch
-import torch.nn.functional as F
 import tqdm
+from sklearn.model_selection import KFold
+from torch import nn
+from torch.utils.data import DataLoader
+from torch.utils.data.dataset import Dataset, Subset
 from torch.utils.tensorboard import SummaryWriter
 
-from wtil.net import Model
-from wtil.utils.dataset import DirDataset
+from wtil.loss import calc_loss
+from wtil.model import Model
+from wtil.preprocess.act import ACT_N
+from wtil.preprocess.obs import OBS_N
+from wtil.preprocess.process import gen_process_fn
+from wtil.utils.dataset import DirDataset, FileDataset
 from wtil.utils.logger import config_logger
-from wtil.utils.process import gen_process_fn
-from wtil.utils.process_act import ACT_N, ACTION_NUM, DIRECTION_NUM
-from wtil.utils.process_obs import OBS_N
 
-USE_CUDA = False  # torch.cuda.is_available()
+USE_CUDA = True  # torch.cuda.is_available()
 USE_DEVICE = "cuda" if USE_CUDA else "cpu"
 
 
-def train(writer, dir_dataloader, model, loss_func, optimizer, epochs):
-    model.train()
-    step = 0
-    for _ in range(epochs):
-        for file_dataloader in dir_dataloader:
-            for file_data in file_dataloader:
-                logging.info(f"processing file: {file_data.filename}")
-                with tqdm.tqdm(total=len(file_data), desc=f"{os.path.basename(file_data.filename)}") as t:
-                    for batch in file_data:
-                        assert len(batch) == 2
-                        # print("batch", type(batch), len(batch), batch[0].shape, batch[1].shape)
-
-                        obs_batch, act_batch = batch[0], batch[1]
-                        predict_act_batch = model(obs_batch)
-
-                        action_loss, moving_dir_loss, control_dir_loss = loss_func(predict_act_batch, act_batch)
-                        loss = action_loss + moving_dir_loss + control_dir_loss
-                        loss.backward()
-                        optimizer.step()
-
-                        writer.add_scalar("loss/action", action_loss.item(), global_step=step)
-                        writer.add_scalar("loss/moving", moving_dir_loss.item(), global_step=step)
-                        writer.add_scalar("loss/control", control_dir_loss.item(), global_step=step)
-                        t.set_postfix(
-                            action=action_loss.item(),
-                            moving=moving_dir_loss.item(),
-                            control=control_dir_loss.item(),
-                        )
-                        t.update()
-
-                        step += 1
+def preprocess_data(
+    data_dir=pathlib.Path(__file__).parent / "data",
+    seq_len=8,
+    device=USE_DEVICE,
+):
+    return DirDataset(
+        path_glob=f"{data_dir}/*.txt",
+        seq_len=seq_len,
+        process_fn=gen_process_fn(device=device),
+    )
 
 
-def get_dir_dataloader() -> DirDataset:
-    data_dir = pathlib.Path(__file__).parent / "data"
+def train(
+    global_step: int,
+    writer: SummaryWriter,
+    model: nn.Module,
+    criterion: Callable[[Any, Any], dict],
+    optimizer: torch.optim.Optimizer,
+    batch_size: int,
+    num_epochs: int,
+    filename: str,
+    train_dataset: Dataset,
+    test_dataset: Dataset,
+) -> int:
 
-    path_glob = f"{data_dir}/*.txt"
-    seq_len = 8
-    batch_size = 16
-    process_fn = gen_process_fn(device=USE_DEVICE)
-    num_workers = 1
+    with tqdm.tqdm(total=num_epochs, desc=f"{filename}") as t:
+        for _ in range(num_epochs):
 
-    dir_dataloader = DirDataset.make_dataloader(path_glob, seq_len, batch_size, process_fn, num_workers)
-    return dir_dataloader
+            model.train(True)
+            train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+            for features, labels in train_dataloader:
+                optimizer.zero_grad()
+                loss = sum(criterion(model(features), labels).values())
+                loss.backward()
+                optimizer.step()
+
+            model.train(False)
+            with torch.no_grad():
+                train_loss = criterion(model(train_dataset[:][0]), train_dataset[:][1])
+                for k, v in train_loss.items():
+                    writer.add_scalar(f"train_loss/{k}", v, global_step=global_step)
+
+                test_loss = criterion(model(test_dataset[:][0]), test_dataset[:][1])
+                for k, v in test_loss.items():
+                    writer.add_scalar(f"test_loss/{k}", v, global_step=global_step)
+
+            t.set_postfix(
+                train_loss=torch.mean(torch.tensor(list(train_loss.values()))).item(),
+                test_loss=torch.mean(torch.tensor(list(test_loss.values()))).item(),
+            )
+            t.update()
+
+            global_step += 1
+
+    return global_step
 
 
-def calc_loss(predict, target):
-    predict_action = predict[:, :, :ACTION_NUM].reshape(-1, ACTION_NUM)
-    target_action = target[:, :, :1].reshape(-1).type(torch.long)
-    action_loss = F.cross_entropy(predict_action, target_action)
+def cross_valid(
+    global_step: int,
+    writer: SummaryWriter,
+    k_fold: int,
+    model: nn.Module,
+    criterion: Callable[[Any, Any], dict],
+    optimizer: torch.optim.Optimizer,
+    dir_dataset: DirDataset,
+    batch_size: int,
+    num_epochs: int,
+) -> int:
 
-    predict_moving_dir = predict[:, :, ACTION_NUM : ACTION_NUM + DIRECTION_NUM].reshape(-1)
-    target_moving_dir = target[:, :, 1 : 1 + DIRECTION_NUM].reshape(-1)
-    moving_dir_loss = F.mse_loss(predict_moving_dir, target_moving_dir)
+    dir_dataloader = dir_dataset.to_dataloader()
+    for file_dataset_batch in dir_dataloader:
 
-    predict_control_dir = predict[:, :, ACTION_NUM + DIRECTION_NUM :].reshape(-1)
-    target_control_dir = target[:, :, 1 + DIRECTION_NUM :].reshape(-1)
-    control_dir_loss = F.mse_loss(predict_control_dir, target_control_dir)
+        file_dataset: FileDataset = file_dataset_batch[0]
+        logging.info(f"processing file: {file_dataset.filename}")
+        kf = KFold(n_splits=k_fold, shuffle=True)
+        for train_indices, test_indices in kf.split(file_dataset):
 
-    return action_loss, moving_dir_loss, control_dir_loss
+            filename = os.path.basename(file_dataset.filename)
+            train_dataset = Subset(file_dataset, train_indices)
+            test_dataset = Subset(file_dataset, test_indices)
+            global_step = train(
+                global_step,
+                writer,
+                model,
+                criterion,
+                optimizer,
+                batch_size,
+                num_epochs,
+                filename,
+                train_dataset,
+                test_dataset,
+            )
+
+    return global_step
 
 
 def main():
+
     config_logger(False, False, None)
 
-    dir_dataloader = get_dir_dataloader()
-
-    hidden_n = 512
-    lr = 1e-4
-
-    model = Model(OBS_N, hidden_n, ACT_N).to(USE_DEVICE)
-    loss_func = calc_loss
-    optimizer = torch.optim.Adam(params=model.parameters(), lr=lr)
+    global_step = 0
     writer = SummaryWriter("./tb")
-    epochs = 10
-    train(writer, dir_dataloader, model, loss_func, optimizer, epochs)
+    k_fold = 10
+    model = Model(OBS_N, 512, ACT_N).to(USE_DEVICE)
+    criterion = calc_loss
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    dir_dataset = preprocess_data()
+    batch_size = 16
+    num_epochs = 1000
+    iters = 10
+
+    for i in range(iters):
+
+        logging.info(f"iterator: {i}")
+        global_step = cross_valid(
+            global_step=global_step,
+            writer=writer,
+            k_fold=k_fold,
+            model=model,
+            criterion=criterion,
+            optimizer=optimizer,
+            dir_dataset=dir_dataset,
+            batch_size=batch_size,
+            num_epochs=num_epochs,
+        )
 
 
 if __name__ == "__main__":

@@ -1,11 +1,11 @@
 import torch
 from torch import nn
 
-from wtil.utils.process_act import ACTION_NUM
+from wtil.preprocess.act import ACTION_NUM
 
 
 class Model(nn.Module):
-    def __init__(self, obs_n, hidden_n, act_n):
+    def __init__(self, obs_n: int, hidden_n: int, act_n: int, device: str = "auto"):
         super().__init__()
         self.fc1 = nn.Linear(obs_n, hidden_n)
         self.fc2 = nn.Linear(hidden_n, act_n)
