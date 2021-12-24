@@ -23,8 +23,8 @@ def process_file(
     act_encoder: ActEncoder,
     *,
     obs_processer: ObsProcessor = None,
-    device: str = "auto",
 ) -> Tuple[torch.Tensor, torch.Tensor]:
+
     logging.debug(f"parse file: {filename}")
     with open(filename, "r") as f:
         obs_act_list = [Parse(line, PlayerObservationData()) for line in f]
@@ -38,11 +38,8 @@ def process_file(
     encoded_obs_list = [obs_encoder(raw_obs_list, raw_act_list, i) for i in range(len(raw_obs_list))]
     encoded_act_list = [act_encoder(raw_obs_list, raw_act_list, i) for i in range(len(raw_act_list))]
 
-    if device == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    encoded_obs_list = torch.tensor(encoded_obs_list, device=device, dtype=torch.float)
-    encoded_act_list = torch.tensor(encoded_act_list, device=device, dtype=torch.float)
+    encoded_obs_list = torch.tensor(encoded_obs_list, dtype=torch.float)
+    encoded_act_list = torch.tensor(encoded_act_list, dtype=torch.float)
     return encoded_obs_list, encoded_act_list
 
 
@@ -50,14 +47,13 @@ def gen_process_fn(
     obs_encoder: ObsEncoder = encode_obs,
     act_encoder: ActEncoder = encode_act,
     obs_processer: ObsProcessor = process_obs,
-    device: str = "auto",
 ) -> ProcessFn:
+
     return partial(
         process_file,
         obs_encoder=obs_encoder,
         act_encoder=act_encoder,
         obs_processer=obs_processer,
-        device=device,
     )
 
 

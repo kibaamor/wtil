@@ -1,3 +1,4 @@
+import re
 from typing import Any, List, Sequence, Tuple
 
 import numpy as np
@@ -6,6 +7,7 @@ from wtil.api.wt_pb2 import (
     ActionData,
     ERLCharacterActionState,
     ERLCharacterMovingState,
+    ERLVirtualDepthMapPointHitObjectType,
     NearestProjectileActor,
     ObservationData,
     RLActionState,
@@ -13,6 +15,7 @@ from wtil.api.wt_pb2 import (
     RLChargeAttackTime,
     RLMovingState,
     RLRangedWeapon,
+    VirtualDepthMapSimple,
 )
 from wtil.preprocess.utils import encode_bool, encode_onehot, encode_ratio, encode_vector3d
 
@@ -30,6 +33,7 @@ MOVING_STATE = {
     ERLCharacterMovingState.CHAR_MOVE_STATE_NOT_MOVING: 4,
     ERLCharacterMovingState.CHAR_MOVE_STATE_WEAK: 5,
     ERLCharacterMovingState.CHAR_MOVE_STATE_DODGESHOOT: 6,
+    ERLCharacterMovingState.CHAR_MOVE_STATE_STAGGER: 7,
 }
 ACTION_STATE = {
     ERLCharacterActionState.RANGED_ATTAK: 0,
@@ -47,8 +51,14 @@ MAX_ACTION_STATE_LENGTH = 4
 ACTION_ID_NUM = 22
 MAX_VALID_ACTION_LENGTH = 4
 
-DATA_N = 25 + 6 + MaxHealth + int(MaxStamina / 10) + MaxHealthPotion + 3 + 3 + 3 + 10 + 75 + 88
-OBS_N = int(DATA_N * 2)
+DEPTH_MAP_CHANNEL = 7  # number of ERLVirtualDepthMapPointHitObjectType + 1(distances)
+DEPTH_MAP_HEIGHT = 45
+DEPTH_MAP_WIDTH = 80
+DEPTH_MAP_SHAPE = (DEPTH_MAP_CHANNEL, DEPTH_MAP_HEIGHT, DEPTH_MAP_WIDTH)
+DEPTH_MAP_DATA_SIZE = DEPTH_MAP_CHANNEL * DEPTH_MAP_HEIGHT * DEPTH_MAP_WIDTH
+
+DATA_N = 25 + 6 + MaxHealth + int(MaxStamina / 10) + MaxHealthPotion + 3 + 3 + 3 + 11 + 75 + 88
+OBS_N = int(DATA_N * 2) + DEPTH_MAP_DATA_SIZE
 
 
 def split_obs(obs: ObservationData) -> Tuple[RLAIData, List[RLAIData]]:
@@ -64,10 +74,13 @@ def process_obs(obs_list: List[ObservationData]) -> List[Tuple[RLAIData, List[RL
 def encode_obs(obs_list: List[Tuple[RLAIData, List[RLAIData]]], act_list: List[ActionData], index: int) -> Any:
     data, oppo_data_list = obs_list[index]
     oppo_data = oppo_data_list[0] if len(oppo_data_list) > 0 else RLAIData()
-    encoded_obs = encode_data(data) + encode_data(oppo_data)
+    encoded_data = encode_data(data) + encode_data(oppo_data)
+    assert len(encoded_data) == int(DATA_N * 2)
 
-    assert len(encoded_obs) == OBS_N
-    return encoded_obs
+    encoded_depth_map = encode_depth_map(data)
+    assert encoded_depth_map.shape == DEPTH_MAP_SHAPE
+
+    return encoded_data + encoded_depth_map.reshape(-1).tolist()
 
 
 def encode_data(data: RLAIData) -> List[float]:
@@ -115,8 +128,8 @@ def encode_weapon(weapon: RLRangedWeapon) -> List[float]:
 
 
 def encode_moving_state(moving_state: RLMovingState) -> List[float]:
-    """10"""
-    assert len(MOVING_STATE) == 7
+    """11"""
+    assert len(MOVING_STATE) == 8
     encoded_cur_state = encode_onehot(moving_state.CurrState, MOVING_STATE)
     encoded_moving_velocity = encode_vector3d(moving_state.MovingVelocity)
     return encoded_cur_state + encoded_moving_velocity
@@ -175,3 +188,27 @@ def encode_valid_actions(valid_actions: Sequence[int]) -> List[float]:
 def encode_projectile(projectile: NearestProjectileActor) -> List[float]:
     """6"""
     return encode_vector3d(projectile.Location) + encode_vector3d(projectile.Velocity)
+
+
+def encode_depth_map(data: RLAIData) -> np.ndarray:
+    depth_map: VirtualDepthMapSimple = data.DepthMap
+
+    assert depth_map.ScreenHeight == DEPTH_MAP_HEIGHT
+    assert depth_map.ScreenWidth == DEPTH_MAP_WIDTH
+
+    data = np.array(re.split(",|\|", depth_map.ScreenPixelString), dtype=np.int)
+    hits = data[::2].reshape(DEPTH_MAP_HEIGHT, DEPTH_MAP_WIDTH)
+    distances = data[1::2].reshape(DEPTH_MAP_HEIGHT, DEPTH_MAP_WIDTH)
+    max_distance = 5000.0
+
+    enemy = np.where(hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_ENEMY), 1.0, 0.0)
+    ally = np.where(hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_ALLY), 1.0, 0.0)
+    neutral = np.where(hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_NEUTRAl), 1.0, 0.0)
+    obstacle = np.where(hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_OBSTACLE), 1.0, 0.0)
+    obstacle_destructible = np.where(
+        hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_OBSTACLE_DESTRUCTIBLE), 1.0, 0.0
+    )
+    none = np.where(hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_NONE), 1.0, 0.0)
+    dist = distances / max_distance
+
+    return np.stack([enemy, ally, neutral, obstacle, obstacle_destructible, none, dist])
