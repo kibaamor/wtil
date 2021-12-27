@@ -43,6 +43,7 @@ def test(
 ) -> float:
 
     losses = defaultdict(list)
+    accuracies = defaultdict(list)
 
     with torch.no_grad():
         dataloader = DataLoader(dataset, batch_size=batch_size)
@@ -50,12 +51,16 @@ def test(
             features = features.to(USE_DEVICE)
             labels = labels.to(USE_DEVICE)
 
-            loss = criterion(model(features), labels)
+            loss, accuracy = criterion(model(features), labels)
             for k, v in loss.items():
                 losses[k].append(v.item())
+            for k, v in accuracy.items():
+                accuracies[k].append(v.item())
 
     for k, v in losses.items():
-        writer.add_scalar(f"{prefix}/{k}", np.mean(v), global_step=global_step)
+        writer.add_scalar(f"{prefix}_loss/{k}", np.mean(v), global_step=global_step)
+    for k, v in accuracies.items():
+        writer.add_scalar(f"{prefix}_accuracy/{k}", np.mean(v), global_step=global_step)
 
     return np.array(np.array(list(losses.values()))).sum(axis=0).mean()
 
@@ -82,7 +87,7 @@ def train(
                 labels = labels.to(USE_DEVICE)
 
                 optimizer.zero_grad()
-                loss = sum(criterion(model(features), labels).values())
+                loss = sum(criterion(model(features), labels)[0].values())
                 loss.backward()
                 optimizer.step()
 
@@ -90,7 +95,7 @@ def train(
             train_loss = test(
                 global_step=global_step,
                 writer=writer,
-                prefix="train_loss",
+                prefix="train",
                 dataset=train_dataset,
                 model=model,
                 criterion=criterion,
@@ -99,7 +104,7 @@ def train(
             test_loss = test(
                 global_step=global_step,
                 writer=writer,
-                prefix="test_loss",
+                prefix="test",
                 dataset=test_dataset,
                 model=model,
                 criterion=criterion,
