@@ -2,7 +2,7 @@ from typing import Any, List, Sequence, Tuple
 
 import numpy as np
 from asyncenv.api.wt.wt_pb2 import ActionData, RLAIData, RLVector3D
-from numpy import int32, ma
+from numpy import int32
 
 from wtil.process.utils import decode_vector3d, encode_vector3d
 

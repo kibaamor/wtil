@@ -4,9 +4,9 @@ from functools import partial
 from typing import Any, Callable, Tuple
 
 import torch
+from asyncenv.api.wt.wt_pb2 import ActionData, ObservationData, PlayerObservationData
 from google.protobuf.json_format import Parse
 
-from asyncenv.api.wt.wt_pb2 import ActionData, ObservationData, PlayerObservationData
 from wtil.process.act import encode_act
 from wtil.process.obs import encode_obs, process_obs
 from wtil.utils.dataset import DirDataset, ProcessFn

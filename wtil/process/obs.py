@@ -195,7 +195,7 @@ def encode_depth_map(data: RLAIData) -> np.ndarray:
     assert depth_map.ScreenHeight == DEPTH_MAP_HEIGHT
     assert depth_map.ScreenWidth == DEPTH_MAP_WIDTH
 
-    data = np.array(re.split(",|\|", depth_map.ScreenPixelString), dtype=np.int)
+    data = np.array(re.split(",|\|", depth_map.ScreenPixelString), dtype=np.int)  # noqa: W605
     hits = data[::2].reshape(DEPTH_MAP_HEIGHT, DEPTH_MAP_WIDTH)
     distances = data[1::2].reshape(DEPTH_MAP_HEIGHT, DEPTH_MAP_WIDTH)
     max_distance = 5000.0
