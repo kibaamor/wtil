@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from wtil.preprocess.act import ACTION_NUM, DIRECTION_NUM
+from wtil.process.act import ACTION_NUM, DIRECTION_NUM
 
 
 def calc_loss(predict: torch.Tensor, target: torch.Tensor) -> dict:

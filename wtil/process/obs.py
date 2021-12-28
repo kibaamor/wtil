@@ -2,9 +2,7 @@ import re
 from typing import Any, List, Sequence, Tuple
 
 import numpy as np
-
-from wtil.api.wt_pb2 import (
-    ActionData,
+from asyncenv.api.wt.wt_pb2 import (
     ERLCharacterActionState,
     ERLCharacterMovingState,
     ERLVirtualDepthMapPointHitObjectType,
@@ -17,7 +15,8 @@ from wtil.api.wt_pb2 import (
     RLRangedWeapon,
     VirtualDepthMapSimple,
 )
-from wtil.preprocess.utils import encode_bool, encode_onehot, encode_ratio, encode_vector3d
+
+from wtil.process.utils import encode_bool, encode_onehot, encode_ratio, vector3d_to_list
 
 MaxHealth = 1000
 MaxHealthPotion = 10.0
@@ -67,12 +66,12 @@ def split_obs(obs: ObservationData) -> Tuple[RLAIData, List[RLAIData]]:
             return obs.AIData[i], obs.AIData[:i] + obs.AIData[i:]
 
 
-def process_obs(obs_list: List[ObservationData]) -> List[Tuple[RLAIData, List[RLAIData]]]:
-    return [split_obs(obs) for obs in obs_list]
+def process_obs(obs: ObservationData) -> Tuple[RLAIData, List[RLAIData]]:
+    return split_obs(obs)
 
 
-def encode_obs(obs_list: List[Tuple[RLAIData, List[RLAIData]]], act_list: List[ActionData], index: int) -> Any:
-    data, oppo_data_list = obs_list[index]
+def encode_obs(obs: Tuple[RLAIData, List[RLAIData]]) -> Any:
+    data, oppo_data_list = obs
     oppo_data = oppo_data_list[0] if len(oppo_data_list) > 0 else RLAIData()
     encoded_data = encode_data(data) + encode_data(oppo_data)
     assert len(encoded_data) == int(DATA_N * 2)
@@ -90,9 +89,9 @@ def encode_data(data: RLAIData) -> List[float]:
     encoded_health = encode_ratio(data.CurrHealth / data.MaxHealth, data.MaxHealth)
     encoded_stamina = encode_ratio(data.CurrStamina / MaxStamina, int(MaxStamina / 10))
     encoded_health_potion = encode_ratio(data.HealthPotion / MaxHealthPotion, MaxHealthPotion)
-    encoded_location = encode_vector3d(data.CurrLocation)
-    encoded_face_dir = encode_vector3d(data.CurrFaceDirection)
-    encoded_control_dir = encode_vector3d(data.CurrControlDirection)
+    encoded_location = vector3d_to_list(data.CurrLocation)
+    encoded_face_dir = vector3d_to_list(data.CurrFaceDirection)
+    encoded_control_dir = vector3d_to_list(data.CurrControlDirection)
     encoded_moving_state = encode_moving_state(data.MovingState)
     encoded_action_state = encode_action_state(data.ActionState)
     encoded_valid_actions = encode_valid_actions(data.ValidActions)
@@ -131,7 +130,7 @@ def encode_moving_state(moving_state: RLMovingState) -> List[float]:
     """11"""
     assert len(MOVING_STATE) == 8
     encoded_cur_state = encode_onehot(moving_state.CurrState, MOVING_STATE)
-    encoded_moving_velocity = encode_vector3d(moving_state.MovingVelocity)
+    encoded_moving_velocity = vector3d_to_list(moving_state.MovingVelocity)
     return encoded_cur_state + encoded_moving_velocity
 
 
@@ -178,7 +177,7 @@ def encode_charge_attack_time(cat: RLChargeAttackTime) -> List[float]:
 def encode_valid_actions(valid_actions: Sequence[int]) -> List[float]:
     """88"""
     encoded = []
-    for action in valid_actions:
+    for action in valid_actions[:MAX_VALID_ACTION_LENGTH]:
         assert ACTION_ID_NUM == 22
         encoded.extend(np.eye(ACTION_ID_NUM)[action].tolist())
     encoded.extend([0.0] * ACTION_ID_NUM * max(0, MAX_VALID_ACTION_LENGTH - len(valid_actions)))
@@ -187,7 +186,7 @@ def encode_valid_actions(valid_actions: Sequence[int]) -> List[float]:
 
 def encode_projectile(projectile: NearestProjectileActor) -> List[float]:
     """6"""
-    return encode_vector3d(projectile.Location) + encode_vector3d(projectile.Velocity)
+    return vector3d_to_list(projectile.Location) + vector3d_to_list(projectile.Velocity)
 
 
 def encode_depth_map(data: RLAIData) -> np.ndarray:

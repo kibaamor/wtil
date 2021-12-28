@@ -3,8 +3,8 @@ from typing import Callable, List, Optional
 import torch
 from torch import nn
 
-from wtil.preprocess.act import ACT_N, ACTION_NUM
-from wtil.preprocess.obs import DEPTH_MAP_CHANNEL, DEPTH_MAP_DATA_SIZE, DEPTH_MAP_SHAPE, OBS_N
+from wtil.process.act import ACT_N, ACTION_NUM
+from wtil.process.obs import DEPTH_MAP_CHANNEL, DEPTH_MAP_DATA_SIZE, DEPTH_MAP_SHAPE, OBS_N
 
 
 def mlp(

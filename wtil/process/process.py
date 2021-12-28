@@ -1,20 +1,20 @@
 import logging
 import pathlib
 from functools import partial
-from typing import Any, Callable, List, Tuple
+from typing import Any, Callable, Tuple
 
 import torch
 from google.protobuf.json_format import Parse
 
-from wtil.api.wt_pb2 import ActionData, ObservationData, PlayerObservationData
-from wtil.preprocess.act import encode_act
-from wtil.preprocess.obs import encode_obs, process_obs
+from asyncenv.api.wt.wt_pb2 import ActionData, ObservationData, PlayerObservationData
+from wtil.process.act import encode_act
+from wtil.process.obs import encode_obs, process_obs
 from wtil.utils.dataset import DirDataset, ProcessFn
 from wtil.utils.logger import config_logger
 
-ObsProcessor = Callable[[List[ObservationData]], List[Any]]
-ObsEncoder = Callable[[List[Any], List[ActionData], int], Any]
-ActEncoder = Callable[[List[Any], List[ActionData], int], Any]
+ObsProcessor = Callable[[ObservationData], Any]
+ObsEncoder = Callable[[Any], Any]
+ActEncoder = Callable[[Any, ActionData], Any]
 
 
 def process_file(
@@ -33,10 +33,12 @@ def process_file(
     raw_act_list = [obs_act.ActionDataArray[-1] for obs_act in obs_act_list]
 
     if obs_processer is not None:
-        raw_obs_list = obs_processer(raw_obs_list)
+        raw_obs_list = [obs_processer(raw_obs) for raw_obs in raw_obs_list]
 
-    encoded_obs_list = [obs_encoder(raw_obs_list, raw_act_list, i) for i in range(len(raw_obs_list))]
-    encoded_act_list = [act_encoder(raw_obs_list, raw_act_list, i) for i in range(len(raw_act_list))]
+    encoded_obs_list = [obs_encoder(obs) for obs in raw_obs_list]
+    encoded_act_list = [
+        act_encoder(raw_obs_list[i - i] if i > 0 else None, raw_act_list[i]) for i in range(len(raw_act_list))
+    ]
 
     encoded_obs_list = torch.tensor(encoded_obs_list, dtype=torch.float)
     encoded_act_list = torch.tensor(encoded_act_list, dtype=torch.float)

@@ -16,15 +16,16 @@ from torch.utils.tensorboard import SummaryWriter
 
 from wtil.loss import calc_loss
 from wtil.model import Model
-from wtil.preprocess.process import gen_process_fn
+from wtil.process.process import gen_process_fn
 from wtil.utils.dataset import DirDataset, FileDataset
 from wtil.utils.logger import config_logger
 
 USE_CUDA = torch.cuda.is_available()
 USE_DEVICE = "cuda" if USE_CUDA else "cpu"
+BEST_ACCURACY = 0.0
 
 
-def preprocess_data(data_dir=pathlib.Path(__file__).parent / "data", seq_len=8):
+def process_data(data_dir=pathlib.Path(__file__).parent / "data", seq_len=8):
     return DirDataset(
         path_glob=f"{data_dir}/*.txt",
         seq_len=seq_len,
@@ -62,7 +63,10 @@ def test(
     for k, v in accuracies.items():
         writer.add_scalar(f"{prefix}_accuracy/{k}", np.mean(v), global_step=global_step)
 
-    return np.array(np.array(list(losses.values()))).sum(axis=0).mean()
+    avg_loss = np.array(np.array(list(losses.values()))).sum(axis=0).mean()
+    avg_accuracy = np.array(np.array(list(accuracies.values()))).sum(axis=0).mean()
+
+    return avg_loss, avg_accuracy
 
 
 def train(
@@ -75,7 +79,6 @@ def train(
     num_epochs: int,
     filename: str,
     train_dataset: Dataset,
-    test_dataset: Dataset,
 ) -> int:
 
     with tqdm.tqdm(total=num_epochs, desc=f"{filename}") as t:
@@ -92,7 +95,7 @@ def train(
                 optimizer.step()
 
             model.train(False)
-            train_loss = test(
+            loss, accuracy = test(
                 global_step=global_step,
                 writer=writer,
                 prefix="train",
@@ -101,17 +104,8 @@ def train(
                 criterion=criterion,
                 batch_size=batch_size,
             )
-            test_loss = test(
-                global_step=global_step,
-                writer=writer,
-                prefix="test",
-                dataset=test_dataset,
-                model=model,
-                criterion=criterion,
-                batch_size=batch_size,
-            )
 
-            t.set_postfix(train_loss=train_loss, test_loss=test_loss)
+            t.set_postfix(loss=loss, accuracy=accuracy)
             t.update()
 
             global_step += 1
@@ -130,6 +124,8 @@ def cross_valid(
     batch_size: int,
     num_epochs: int,
 ) -> int:
+
+    global BEST_ACCURACY
 
     dir_dataloader = dir_dataset.to_dataloader()
     for file_dataset_batch in dir_dataloader:
@@ -152,8 +148,23 @@ def cross_valid(
                 num_epochs,
                 filename,
                 train_dataset,
-                test_dataset,
             )
+
+            _, test_accuracy = test(
+                global_step=global_step,
+                writer=writer,
+                prefix="test",
+                dataset=test_dataset,
+                model=model,
+                criterion=criterion,
+                batch_size=batch_size,
+            )
+
+            logging.info(f"test accuracy: {test_accuracy}, best accuracy:{BEST_ACCURACY}")
+            if test_accuracy > BEST_ACCURACY:
+                BEST_ACCURACY = test_accuracy
+                model.train(False)
+                torch.save(model.state_dict(), f"wtil_{test_accuracy:.3f}.pth")
 
     return global_step
 
@@ -165,9 +176,9 @@ def main():
     batch_size = 128
     seq_len = 30
     k_fold = 10
-    dir_dataset = preprocess_data(seq_len=seq_len)
-    num_epochs = 1000
-    iters = 10
+    dir_dataset = process_data(seq_len=seq_len)
+    num_epochs = 10
+    iters = 100000
     lr = 1e-3
 
     global_step = 0
@@ -175,6 +186,11 @@ def main():
     model = Model().to(USE_DEVICE)
     criterion = calc_loss
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    pth = ""
+    if len(pth) > 0:
+        logging.info(f"load model from file: {pth}")
+        model.load_state_dict(torch.load(pth))
 
     for i in range(iters):
 
