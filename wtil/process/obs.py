@@ -9,6 +9,7 @@ from asyncenv.api.wt.wt_pb2 import (
     NearestProjectileActor,
     ObservationData,
     RLActionState,
+    RLActionStateItem,
     RLAIData,
     RLChargeAttackTime,
     RLMovingState,
@@ -152,13 +153,13 @@ def encode_action_state(action_state: RLActionState) -> List[float]:
     )
 
 
-def encode_action_state_cur_state_list(state_list) -> List[float]:
+def encode_action_state_cur_state_list(state_list: Sequence[RLActionStateItem]) -> List[float]:
     """40"""
     encoded = []
 
     assert len(ACTION_STATE) == 10
-    for state in state_list:
-        encoded.extend(encode_onehot(state, ACTION_STATE))
+    for state in state_list[:MAX_ACTION_STATE_LENGTH]:
+        encoded.extend(encode_onehot(state.State, ACTION_STATE))
 
     assert MAX_ACTION_STATE_LENGTH == 4
     encoded.extend([0.0] * len(ACTION_STATE) * max(0, MAX_ACTION_STATE_LENGTH - len(state_list)))
