@@ -3,7 +3,7 @@ import logging
 import os
 import pathlib
 from collections import defaultdict
-from typing import Any, Callable
+from typing import Any, Callable, Dict
 
 import numpy as np
 import torch
@@ -14,23 +14,23 @@ from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset, Subset
 from torch.utils.tensorboard import SummaryWriter
 
+from wtil.dataset.npy import NpyDirDataset, NpyFileDataset
 from wtil.loss import calc_loss
 from wtil.model import Model
-from wtil.process.process import gen_process_fn
-from wtil.utils.dataset import DirDataset, FileDataset
+from wtil.process.mask import get_control_dir_mask_array, get_move_dir_mask_array
 from wtil.utils.logger import config_logger
 
-USE_CUDA = torch.cuda.is_available()
+USE_CUDA = False  # torch.cuda.is_available()
 USE_DEVICE = "cuda" if USE_CUDA else "cpu"
 BEST_ACCURACY = 0.0
 
 
-def process_data(data_dir=pathlib.Path(__file__).parent / "data", seq_len=8):
-    return DirDataset(
-        path_glob=f"{data_dir}/*.txt",
-        seq_len=seq_len,
-        process_fn=gen_process_fn(),
-    )
+def process_data(data_dir=pathlib.Path(__file__).parent / "data_processed", seq_len=8):
+    return NpyDirDataset(path_glob=f"{data_dir}/*.npy", seq_len=seq_len)
+
+
+def to_device(data: Dict[str, torch.Tensor], device: str) -> Dict[str, torch.Tensor]:
+    return {k: v.to(device) for k, v in data.items()}
 
 
 def test(
@@ -39,7 +39,8 @@ def test(
     prefix: str,
     dataset: Dataset,
     model: nn.Module,
-    criterion: Callable[[Any, Any], dict],
+    dir_mask: Dict[str, torch.Tensor],
+    criterion: Callable[[Any, Any, Any], dict],
     batch_size: int,
 ) -> float:
 
@@ -49,14 +50,14 @@ def test(
     with torch.no_grad():
         dataloader = DataLoader(dataset, batch_size=batch_size)
         for features, labels in dataloader:
-            features = features.to(USE_DEVICE)
-            labels = labels.to(USE_DEVICE)
+            features = to_device(features, USE_DEVICE)
+            labels = to_device(labels, USE_DEVICE)
 
-            loss, accuracy = criterion(model(features), labels)
+            loss, accuracy = criterion(model(features), labels, dir_mask)
             for k, v in loss.items():
-                losses[k].append(v.item())
+                losses[k].append(v)
             for k, v in accuracy.items():
-                accuracies[k].append(v.item())
+                accuracies[k].append(v)
 
     for k, v in losses.items():
         writer.add_scalar(f"{prefix}_loss/{k}", np.mean(v), global_step=global_step)
@@ -73,7 +74,8 @@ def train(
     global_step: int,
     writer: SummaryWriter,
     model: nn.Module,
-    criterion: Callable[[Any, Any], dict],
+    dir_mask: Dict[str, torch.Tensor],
+    criterion: Callable[[Any, Any, Any], dict],
     optimizer: torch.optim.Optimizer,
     batch_size: int,
     num_epochs: int,
@@ -86,11 +88,11 @@ def train(
             model.train(True)
             train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
             for features, labels in train_dataloader:
-                features = features.to(USE_DEVICE)
-                labels = labels.to(USE_DEVICE)
+                features = to_device(features, USE_DEVICE)
+                labels = to_device(labels, USE_DEVICE)
 
                 optimizer.zero_grad()
-                loss = sum(criterion(model(features), labels)[0].values())
+                loss = sum(criterion(model(features), labels, dir_mask)[0].values())
                 loss.backward()
                 optimizer.step()
 
@@ -101,6 +103,7 @@ def train(
                 prefix="train",
                 dataset=train_dataset,
                 model=model,
+                dir_mask=dir_mask,
                 criterion=criterion,
                 batch_size=batch_size,
             )
@@ -118,9 +121,10 @@ def cross_valid(
     writer: SummaryWriter,
     k_fold: int,
     model: nn.Module,
+    dir_mask: Dict[str, torch.Tensor],
     criterion: Callable[[Any, Any], dict],
     optimizer: torch.optim.Optimizer,
-    dir_dataset: DirDataset,
+    dir_dataset: NpyDirDataset,
     batch_size: int,
     num_epochs: int,
 ) -> int:
@@ -130,7 +134,7 @@ def cross_valid(
     dir_dataloader = dir_dataset.to_dataloader()
     for file_dataset_batch in dir_dataloader:
 
-        file_dataset: FileDataset = file_dataset_batch[0]
+        file_dataset: NpyFileDataset = file_dataset_batch[0]
         logging.info(f"processing file: {file_dataset.filename}")
         kf = KFold(n_splits=k_fold, shuffle=True)
         for train_indices, test_indices in kf.split(file_dataset):
@@ -139,15 +143,16 @@ def cross_valid(
             train_dataset = Subset(file_dataset, train_indices)
             test_dataset = Subset(file_dataset, test_indices)
             global_step = train(
-                global_step,
-                writer,
-                model,
-                criterion,
-                optimizer,
-                batch_size,
-                num_epochs,
-                filename,
-                train_dataset,
+                global_step=global_step,
+                writer=writer,
+                model=model,
+                dir_mask=dir_mask,
+                criterion=criterion,
+                optimizer=optimizer,
+                batch_size=batch_size,
+                num_epochs=num_epochs,
+                filename=filename,
+                train_dataset=train_dataset,
             )
 
             _, test_accuracy = test(
@@ -156,6 +161,7 @@ def cross_valid(
                 prefix="test",
                 dataset=test_dataset,
                 model=model,
+                dir_mask=dir_mask,
                 criterion=criterion,
                 batch_size=batch_size,
             )
@@ -187,6 +193,11 @@ def main():
     criterion = calc_loss
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
+    dir_mask = dict(
+        move_dir=torch.from_numpy(get_move_dir_mask_array()).type(torch.long).to(USE_DEVICE),
+        control_dir=torch.from_numpy(get_control_dir_mask_array()).type(torch.long).to(USE_DEVICE),
+    )
+
     pth = ""
     if len(pth) > 0:
         logging.info(f"load model from file: {pth}")
@@ -200,6 +211,7 @@ def main():
             writer=writer,
             k_fold=k_fold,
             model=model,
+            dir_mask=dir_mask,
             criterion=criterion,
             optimizer=optimizer,
             dir_dataset=dir_dataset,

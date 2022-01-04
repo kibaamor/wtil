@@ -1,5 +1,5 @@
 import re
-from typing import Any, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 from asyncenv.api.wt.wt_pb2 import (
@@ -17,14 +17,21 @@ from asyncenv.api.wt.wt_pb2 import (
     VirtualDepthMapSimple,
 )
 
-from wtil.process.utils import encode_bool, encode_onehot, encode_ratio, vector3d_to_list
+from wtil.process.utils import encode_bool, encode_onehot, encode_ratio, vector3d_to_numpy
 
-MaxHealth = 1000
-MaxHealthPotion = 10.0
-MaxStamina = 400.0
+MAX_ENCODED_HEALTH_LENGTH = 100
+MAX_ENCODED_STAMINA_LENGTH = 100
+MAX_ENCODED_HEALTH_POTION_LENGTH = 100
+MAX_ENCODED_AMMO_LENGTH = 10
+MAX_ACTION_STATE_LENGTH = 4
+MAX_ENCODED_TIME_LENGTH = 10
+
+MAX_HEALTH_POTION = 10.0
+MAX_STAMINA = 400.0
+MAX_AMMO_LEFT = 10000
+ACTION_ID_NUM = 22
 
 MAX_BURST_COUNT = {0: 0, -1: 1, 1: 2, 3: 3}
-MAX_AMMO_LEFT = 10000
 MOVING_STATE = {
     ERLCharacterMovingState.CHAR_MOVE_STATE_WALKING: 0,
     ERLCharacterMovingState.CHAR_MOVE_STATE_RUNNING: 1,
@@ -47,159 +54,176 @@ ACTION_STATE = {
     ERLCharacterActionState.MELEE_SPECIAL_2_CHARGING: 8,
     ERLCharacterActionState.SPECIAL_RANGED_ATTACK_CHARGING: 9,
 }
-MAX_ACTION_STATE_LENGTH = 4
-ACTION_ID_NUM = 22
-MAX_VALID_ACTION_LENGTH = 4
 
-DEPTH_MAP_CHANNEL = 7  # number of ERLVirtualDepthMapPointHitObjectType + 1(distances)
-DEPTH_MAP_HEIGHT = 45
-DEPTH_MAP_WIDTH = 80
-DEPTH_MAP_SHAPE = (DEPTH_MAP_CHANNEL, DEPTH_MAP_HEIGHT, DEPTH_MAP_WIDTH)
-DEPTH_MAP_DATA_SIZE = DEPTH_MAP_CHANNEL * DEPTH_MAP_HEIGHT * DEPTH_MAP_WIDTH
-
-DATA_N = 25 + 6 + MaxHealth + int(MaxStamina / 10) + MaxHealthPotion + 3 + 3 + 3 + 11 + 75 + 88
-OBS_N = int(DATA_N * 2) + DEPTH_MAP_DATA_SIZE
+ENCODE_DATA_LENGTH = 426
+ENCODE_OPPO_DATA_LENGTH = 426
+DEPTH_MAP_SHAPE = (7, 45, 80)
+ACTION_MASK_LENGTH = ACTION_ID_NUM
 
 
-def split_obs(obs: ObservationData) -> Tuple[RLAIData, List[RLAIData]]:
+def process_obs(obs: ObservationData) -> Tuple[RLAIData, List[RLAIData]]:
     for i in range(len(obs.AIData)):
         if obs.AIData[i].EpisodeId == obs.EpisodeId:
             return obs.AIData[i], obs.AIData[:i] + obs.AIData[i:]
 
 
-def process_obs(obs: ObservationData) -> Tuple[RLAIData, List[RLAIData]]:
-    return split_obs(obs)
-
-
-def encode_obs(obs: Tuple[RLAIData, List[RLAIData]]) -> Any:
+def encode_obs(obs: Tuple[RLAIData, List[RLAIData]]) -> Dict[str, np.ndarray]:
     data, oppo_data_list = obs
     oppo_data = oppo_data_list[0] if len(oppo_data_list) > 0 else RLAIData()
-    encoded_data = encode_data(data) + encode_data(oppo_data)
-    assert len(encoded_data) == int(DATA_N * 2)
 
+    encoded_data = encode_data(data)
+    encoded_oppo_data = encode_data(oppo_data)
     encoded_depth_map = encode_depth_map(data)
-    assert encoded_depth_map.shape == DEPTH_MAP_SHAPE
+    encoded_action_mask = gen_action_mask(data)
 
-    return encoded_data + encoded_depth_map.reshape(-1).tolist()
+    assert ENCODE_DATA_LENGTH == len(encoded_data)
+    assert ENCODE_OPPO_DATA_LENGTH == len(encoded_oppo_data)
+    assert DEPTH_MAP_SHAPE == encoded_depth_map.shape
+    assert ACTION_MASK_LENGTH == len(encoded_action_mask)
 
-
-def encode_data(data: RLAIData) -> List[float]:
-    assert MaxHealth == data.MaxHealth
-    encoded_weapon = encode_weapon(data.HeldWeapon)
-    encoded_projectile = encode_projectile(data.ProjectileActor)
-    encoded_health = encode_ratio(data.CurrHealth / data.MaxHealth, data.MaxHealth)
-    encoded_stamina = encode_ratio(data.CurrStamina / MaxStamina, int(MaxStamina / 10))
-    encoded_health_potion = encode_ratio(data.HealthPotion / MaxHealthPotion, MaxHealthPotion)
-    encoded_location = vector3d_to_list(data.CurrLocation)
-    encoded_face_dir = vector3d_to_list(data.CurrFaceDirection)
-    encoded_control_dir = vector3d_to_list(data.CurrControlDirection)
-    encoded_moving_state = encode_moving_state(data.MovingState)
-    encoded_action_state = encode_action_state(data.ActionState)
-    encoded_valid_actions = encode_valid_actions(data.ValidActions)
-
-    return (
-        encoded_weapon
-        + encoded_projectile
-        + encoded_health
-        + encoded_stamina
-        + encoded_health_potion
-        + encoded_location
-        + encoded_face_dir
-        + encoded_control_dir
-        + encoded_moving_state
-        + encoded_action_state
-        + encoded_valid_actions
+    return dict(
+        data=encoded_data,
+        oppo_data=encoded_oppo_data,
+        depth_map=encoded_depth_map,
+        action_mask=encoded_action_mask,
     )
 
 
-def encode_weapon(weapon: RLRangedWeapon) -> List[float]:
-    """25"""
-    if weapon.WeaponID != -1:
-        accumulate_shoot = encode_bool(weapon.SupportAccumlateShoot)  # 1
+def encode_data(data: RLAIData) -> np.ndarray:
+    encoded_weapon = encode_weapon(data.HeldWeapon)
+    encoded_projectile = encode_projectile(data.ProjectileActor)
+    encoded_health = encode_ratio(data.CurrHealth / data.MaxHealth, MAX_ENCODED_HEALTH_LENGTH)
+    encoded_stamina = encode_ratio(data.CurrStamina / MAX_STAMINA, MAX_ENCODED_STAMINA_LENGTH)
+    encoded_health_potion = encode_ratio(data.HealthPotion / MAX_HEALTH_POTION, MAX_ENCODED_HEALTH_POTION_LENGTH)
+    encoded_location = vector3d_to_numpy(data.CurrLocation)
+    encoded_face_dir = vector3d_to_numpy(data.CurrFaceDirection)
+    encoded_control_dir = vector3d_to_numpy(data.CurrControlDirection)
+    encoded_moving_state = encode_moving_state(data.MovingState)
+    encoded_action_state = encode_action_state(data.ActionState)
 
-        assert len(MAX_BURST_COUNT) == 4
-        max_burst_count = encode_onehot(weapon.MaxBurstCount, MAX_BURST_COUNT)  # 4
+    return np.concatenate(
+        [
+            encoded_weapon,
+            encoded_projectile,
+            encoded_health,
+            encoded_stamina,
+            encoded_health_potion,
+            encoded_location,
+            encoded_face_dir,
+            encoded_control_dir,
+            encoded_moving_state,
+            encoded_action_state,
+        ]
+    )
 
-        ammo_loaded_state = encode_ratio(weapon.AmmoLoaded / weapon.MaxAmmoLoad, 10)  # 10
-        ammo_left_state = encode_ratio(weapon.TotalAmmoLeft / MAX_AMMO_LEFT, 10)  # 10
-        return accumulate_shoot + max_burst_count + ammo_loaded_state + ammo_left_state
 
-    return [0.0] * 25
+def encode_weapon(weapon: RLRangedWeapon) -> np.ndarray:
+    MAX_SIZE = 1 + len(MAX_BURST_COUNT) + MAX_ENCODED_AMMO_LENGTH + MAX_ENCODED_AMMO_LENGTH
+
+    if weapon.WeaponID == -1:
+        return np.zeros(MAX_SIZE)
+
+    accumulate_shoot = encode_bool(weapon.SupportAccumlateShoot)
+
+    assert len(MAX_BURST_COUNT) == 4
+    max_burst_count = encode_onehot(weapon.MaxBurstCount, MAX_BURST_COUNT)
+    ammo_loaded_state = encode_ratio(weapon.AmmoLoaded / weapon.MaxAmmoLoad, MAX_ENCODED_AMMO_LENGTH)
+    ammo_left_state = encode_ratio(weapon.TotalAmmoLeft / MAX_AMMO_LEFT, MAX_ENCODED_AMMO_LENGTH)
+
+    return np.concatenate(
+        [
+            accumulate_shoot,
+            max_burst_count,
+            ammo_loaded_state,
+            ammo_left_state,
+        ]
+    )
 
 
-def encode_moving_state(moving_state: RLMovingState) -> List[float]:
-    """11"""
+def encode_moving_state(moving_state: RLMovingState) -> np.ndarray:
     assert len(MOVING_STATE) == 8
     encoded_cur_state = encode_onehot(moving_state.CurrState, MOVING_STATE)
-    encoded_moving_velocity = vector3d_to_list(moving_state.MovingVelocity)
-    return encoded_cur_state + encoded_moving_velocity
+    encoded_moving_velocity = vector3d_to_numpy(moving_state.MovingVelocity)
+    return np.concatenate(
+        [
+            encoded_cur_state,
+            encoded_moving_velocity,
+        ]
+    )
 
 
-def encode_action_state(action_state: RLActionState) -> List[float]:
-    """75"""
+def encode_action_state(action_state: RLActionState) -> np.ndarray:
     encoded_cur_state_list = encode_action_state_cur_state_list(action_state.CurrStateList)
     encoded_ranged_attack = encode_charge_attack_time(action_state.RangedAttack)
     encoded_special_ranged_attack = encode_charge_attack_time(action_state.SpecialRangedAttack)
     encoded_melee_ranged_attack2 = encode_charge_attack_time(action_state.MeleeSpecialAttack2)
     encoded_normal_defend_success = encode_bool(action_state.NormalShootingDefendSuccess)
     encoded_perfect_defend_success = encode_bool(action_state.PerfectDefendSuccess)
-    return (
-        encoded_cur_state_list
-        + encoded_ranged_attack
-        + encoded_special_ranged_attack
-        + encoded_melee_ranged_attack2
-        + encoded_normal_defend_success
-        + encoded_perfect_defend_success
+    return np.concatenate(
+        [
+            encoded_cur_state_list,
+            encoded_ranged_attack,
+            encoded_special_ranged_attack,
+            encoded_melee_ranged_attack2,
+            encoded_normal_defend_success,
+            encoded_perfect_defend_success,
+        ]
     )
 
 
-def encode_action_state_cur_state_list(state_list: Sequence[RLActionStateItem]) -> List[float]:
-    """40"""
-    encoded = []
+def encode_action_state_cur_state_list(state_list: Sequence[RLActionStateItem]) -> np.ndarray:
+    MAX_SIZE = len(ACTION_STATE) * MAX_ACTION_STATE_LENGTH
 
-    assert len(ACTION_STATE) == 10
-    for state in state_list[:MAX_ACTION_STATE_LENGTH]:
-        encoded.extend(encode_onehot(state.State, ACTION_STATE))
+    if len(state_list) == 0:
+        return np.zeros(MAX_SIZE)
 
-    assert MAX_ACTION_STATE_LENGTH == 4
-    encoded.extend([0.0] * len(ACTION_STATE) * max(0, MAX_ACTION_STATE_LENGTH - len(state_list)))
+    state_list = [item.State for item in state_list]
+    state_list.sort()
+
+    encoded_state_list = [encode_onehot(state, ACTION_STATE) for state in state_list[:MAX_ACTION_STATE_LENGTH]]
+    encoded = np.concatenate(encoded_state_list)
+
+    if len(encoded) < MAX_SIZE:
+        encoded = np.pad(encoded, (0, MAX_SIZE - len(encoded)))
 
     return encoded
 
 
-def encode_charge_attack_time(cat: RLChargeAttackTime) -> List[float]:
-    """11"""
-    if cat.MaxTime > 0:
-        can_fire = encode_bool(cat.CurrTime > cat.MinTime)
-        return can_fire + encode_ratio(cat.CurrTime / cat.MaxTime, 10)
-    return [0.0] * 11
+def encode_charge_attack_time(cat: RLChargeAttackTime) -> np.ndarray:
+    MAX_SIZE = 1 + MAX_ENCODED_TIME_LENGTH
+
+    if cat.MaxTime <= 0:
+        return np.zeros(MAX_SIZE)
+
+    encoded_can_fire = encode_bool(cat.CurrTime > cat.MinTime)
+    encoded_fire_ratio = encode_ratio(cat.CurrTime / cat.MaxTime, MAX_ENCODED_TIME_LENGTH)
+    return np.concatenate(
+        [
+            encoded_can_fire,
+            encoded_fire_ratio,
+        ]
+    )
 
 
-def encode_valid_actions(valid_actions: Sequence[int]) -> List[float]:
-    """88"""
-    encoded = []
-    for action in valid_actions[:MAX_VALID_ACTION_LENGTH]:
-        assert ACTION_ID_NUM == 22
-        encoded.extend(np.eye(ACTION_ID_NUM)[action].tolist())
-    encoded.extend([0.0] * ACTION_ID_NUM * max(0, MAX_VALID_ACTION_LENGTH - len(valid_actions)))
-    return encoded
-
-
-def encode_projectile(projectile: NearestProjectileActor) -> List[float]:
-    """6"""
-    return vector3d_to_list(projectile.Location) + vector3d_to_list(projectile.Velocity)
+def encode_projectile(projectile: NearestProjectileActor) -> np.ndarray:
+    encoded_location = vector3d_to_numpy(projectile.Location)
+    encoded_velocity = vector3d_to_numpy(projectile.Velocity)
+    return np.concatenate(
+        [
+            encoded_location,
+            encoded_velocity,
+        ]
+    )
 
 
 def encode_depth_map(data: RLAIData) -> np.ndarray:
     depth_map: VirtualDepthMapSimple = data.DepthMap
-
-    assert depth_map.ScreenHeight == DEPTH_MAP_HEIGHT
-    assert depth_map.ScreenWidth == DEPTH_MAP_WIDTH
+    height = depth_map.ScreenHeight
+    width = depth_map.ScreenWidth
 
     data = np.array(re.split(",|\|", depth_map.ScreenPixelString), dtype=np.int)  # noqa: W605
-    hits = data[::2].reshape(DEPTH_MAP_HEIGHT, DEPTH_MAP_WIDTH)
-    distances = data[1::2].reshape(DEPTH_MAP_HEIGHT, DEPTH_MAP_WIDTH)
-    max_distance = 5000.0
+    hits = data[::2].reshape(height, width)
+    distances = data[1::2].reshape(height, width)
 
     enemy = np.where(hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_ENEMY), 1.0, 0.0)
     ally = np.where(hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_ALLY), 1.0, 0.0)
@@ -209,6 +233,16 @@ def encode_depth_map(data: RLAIData) -> np.ndarray:
         hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_OBSTACLE_DESTRUCTIBLE), 1.0, 0.0
     )
     none = np.where(hits == int(ERLVirtualDepthMapPointHitObjectType.OBJECT_NONE), 1.0, 0.0)
-    dist = distances / max_distance
+    dist = distances / depth_map.MaxViewDistance
 
     return np.stack([enemy, ally, neutral, obstacle, obstacle_destructible, none, dist])
+
+
+def gen_action_mask(data: RLAIData) -> np.ndarray:
+    mask = np.zeros(ACTION_ID_NUM, dtype=int)
+
+    for action in data.ValidActions:
+        assert 0 <= action < ACTION_ID_NUM
+        mask[action] = 1
+
+    return mask

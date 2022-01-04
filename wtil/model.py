@@ -3,8 +3,8 @@ from typing import Callable, List, Optional
 import torch
 from torch import nn
 
-from wtil.process.act import ACT_N, ACTION_NUM
-from wtil.process.obs import DEPTH_MAP_CHANNEL, DEPTH_MAP_DATA_SIZE, DEPTH_MAP_SHAPE, OBS_N
+from wtil.process.act import ACT_N, ACTION_NUM, DIRECTION_NUM
+from wtil.process.obs import DEPTH_MAP_SHAPE, ENCODE_DATA_LENGTH, ENCODE_OPPO_DATA_LENGTH
 
 
 def mlp(
@@ -50,18 +50,24 @@ class Model(nn.Module):
         super().__init__()
 
         self.data_encoder = mlp(
-            sizes=[OBS_N - DEPTH_MAP_DATA_SIZE, 512],
+            sizes=[ENCODE_DATA_LENGTH, 128],
             activation=nn.ReLU,
         )
+        self.oppo_data_encoder = mlp(
+            sizes=[ENCODE_OPPO_DATA_LENGTH, 128],
+            activation=nn.ReLU,
+        )
+
+        depth_map_channel_num = DEPTH_MAP_SHAPE[0]
         self.depth_map_encoder = conv2d(
-            filters=[DEPTH_MAP_CHANNEL, DEPTH_MAP_CHANNEL * 2, DEPTH_MAP_CHANNEL * 4],
+            filters=[depth_map_channel_num, depth_map_channel_num * 2, depth_map_channel_num * 4],
             kernel_size=3,
             activation=nn.ReLU,
             pool_size=2,
             with_flatten=True,
         )
-        self.core_encoder = nn.LSTM(
-            input_size=6672,
+        self.core_encoder = nn.GRU(
+            input_size=6416,
             hidden_size=1024,
             num_layers=3,
             dropout=0.2,
@@ -69,24 +75,34 @@ class Model(nn.Module):
         )
         self.fc = mlp([1024, 512, ACT_N], activation=nn.ReLU)
 
-    def forward(self, obs):
-        input_shape = obs.shape
-        batch_size = input_shape[0]
-        seq_len = input_shape[1]
+    def forward(self, obs_batch):
+        data = obs_batch["data"].type(torch.float)
+        oppo_data = obs_batch["oppo_data"].type(torch.float)
+        depth_map = obs_batch["depth_map"].type(torch.float)
 
-        data = obs[:, :, :-DEPTH_MAP_DATA_SIZE]
         encoded_data = self.data_encoder(data)
+        encoded_oppo_data = self.oppo_data_encoder(oppo_data)
 
-        depth_map = obs[:, :, OBS_N - DEPTH_MAP_DATA_SIZE :].reshape((batch_size * seq_len,) + DEPTH_MAP_SHAPE)
-        encoded_depth_map = self.depth_map_encoder(depth_map).reshape(batch_size, seq_len, -1)
+        shape = depth_map.shape
+        depth_map = depth_map.reshape((shape[0] * shape[1],) + shape[2:])
+        encoded_depth_map = self.depth_map_encoder(depth_map)
+        encoded_depth_map = encoded_depth_map.reshape(shape[0], shape[1], -1)
 
-        core_input = torch.cat([encoded_data, encoded_depth_map], dim=2)
+        core_input = torch.cat([encoded_data, encoded_oppo_data, encoded_depth_map], dim=2)
         encoded_core = self.core_encoder(core_input)
-        hidden_state = encoded_core[0][:, -1:, :].reshape(batch_size, -1)
+        hidden_state = encoded_core[0][:, -1:, :].reshape(shape[0], -1)
 
         encoded_fc = self.fc(hidden_state)
 
-        act = torch.softmax(encoded_fc[:, :ACTION_NUM], dim=-1)
-        dir = torch.tanh(encoded_fc[:, ACTION_NUM:])
-        ret = torch.cat([act, dir], dim=-1)
-        return ret
+        action_mask = obs_batch["action_mask"][:, -1:, :].reshape(shape[0], -1)
+        encoded_action = encoded_fc[:, :ACTION_NUM]
+        masked_action = encoded_action * action_mask
+        action_probs = torch.softmax(masked_action, dim=-1)
+
+        dir_list = torch.tanh(encoded_fc[:, ACTION_NUM:])
+
+        return dict(
+            action_probs=action_probs,
+            move_dir=dir_list[:, :DIRECTION_NUM],
+            control_dir=dir_list[:, DIRECTION_NUM:],
+        )

@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader, Dataset, TensorDataset
 ProcessFn = Callable[[str], Sequence[torch.Tensor]]
 
 
-class FileDataset(Dataset):
+class RawFileDataset(Dataset):
     def __init__(self, filename: str, seq_len: int, process_fn: ProcessFn):
         self.filename = filename
         self.seq_len = seq_len
@@ -33,7 +33,7 @@ class FileDataset(Dataset):
 
     @staticmethod
     def make_dataloader(filename: str, seq_len: int, batch_size: int, process_fn: ProcessFn):
-        dataset = FileDataset(filename, seq_len, process_fn)
+        dataset = RawFileDataset(filename, seq_len, process_fn)
         return dataset.to_dataloader(batch_size=batch_size)
 
 
@@ -41,7 +41,7 @@ def by_pass(x: Any) -> Any:
     return x
 
 
-class DirDataset(Dataset):
+class RawDirDataset(Dataset):
     def __init__(self, path_glob: str, seq_len: int, process_fn: ProcessFn):
         self.file_list = glob.glob(path_glob)
         if len(self.file_list) == 0:
@@ -52,13 +52,13 @@ class DirDataset(Dataset):
     def __len__(self):
         return len(self.file_list)
 
-    def __getitem__(self, index: np.ndarray) -> FileDataset:
-        return FileDataset(self.file_list[index], self.seq_len, self.process_fn)
+    def __getitem__(self, index: np.ndarray) -> RawFileDataset:
+        return RawFileDataset(self.file_list[index], self.seq_len, self.process_fn)
 
     def to_dataloader(self, num_workers: int = 1) -> DataLoader:
         return DataLoader(self, shuffle=True, num_workers=num_workers, collate_fn=by_pass)
 
     @staticmethod
     def make_dataloader(path_glob: int, seq_len: int, process_fn: ProcessFn, num_workers: int = 1):
-        dataset = DirDataset(path_glob, seq_len, process_fn)
+        dataset = RawDirDataset(path_glob, seq_len, process_fn)
         return dataset.to_dataloader(num_workers=num_workers)

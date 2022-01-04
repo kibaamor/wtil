@@ -1,29 +1,26 @@
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import numpy as np
 from asyncenv.api.wt.wt_pb2 import RLVector3D
 from pyrr import Quaternion, Vector3
 
 
-def encode_ratio(ratio: float, length: int) -> List[float]:
-    """length"""
-    n = int(min(ratio, 1.0) * length)
-    return [1.0] * n + [0.0] * int(length - n)
+def encode_ratio(ratio: float, length: int) -> np.ndarray:
+    encoded = np.zeros(length)
+    encoded[: int(ratio * length)] = 1.0
+    return encoded
 
 
-def vector3d_to_list(v: RLVector3D) -> List[float]:
-    """3"""
-    return [v.X, v.Y, v.Z]
+def vector3d_to_numpy(v: RLVector3D) -> np.ndarray:
+    return np.array([v.X, v.Y, v.Z])
 
 
-def encode_bool(v: bool) -> List[float]:
-    """1"""
-    return [1.0 if v else 0.0]
+def encode_bool(v: bool) -> np.ndarray:
+    return np.array([1.0 if v else 0.0])
 
 
-def encode_onehot(v: Any, d: Dict[Any, int]) -> List[float]:
-    """len(d)"""
-    return np.eye(len(d))[d[v]].tolist()
+def encode_onehot(v: Any, d: Dict[Any, int]) -> np.ndarray:
+    return np.eye(len(d))[d[v]]
 
 
 def rotation_to(src: Vector3, dst: Vector3) -> Quaternion:
@@ -52,8 +49,7 @@ def rotation_to(src: Vector3, dst: Vector3) -> Quaternion:
         return Quaternion((src ^ dst).tolist() + [1 + dot]).normalized
 
 
-def encode_vector3d(src: RLVector3D, dst: RLVector3D) -> List[float]:
-    """4"""
+def encode_vector3d(src: RLVector3D, dst: RLVector3D) -> np.ndarray:
     src = Vector3([src.X, src.Y, src.Z])
     dst = Vector3([dst.X, dst.Y, dst.Z])
 
@@ -61,10 +57,10 @@ def encode_vector3d(src: RLVector3D, dst: RLVector3D) -> List[float]:
         quat = Quaternion([0, 0, 0, 1])
     else:
         quat = rotation_to(src, dst)
-    return quat.tolist()
+    return quat
 
 
-def decode_vector3d(src: RLVector3D, data: List[float]) -> RLVector3D:
+def decode_vector3d(src: RLVector3D, data: np.ndarray) -> RLVector3D:
     assert len(data) == 4
     src = Vector3([src.X, src.Y, src.Z])
 
@@ -74,4 +70,5 @@ def decode_vector3d(src: RLVector3D, data: List[float]) -> RLVector3D:
         src = src.normalized
         quat = Quaternion(data).normalized
         dst = quat * src
+
     return RLVector3D(X=dst.x, Y=dst.y, Z=dst.z)

@@ -1,4 +1,4 @@
-from typing import Any, List, Sequence, Tuple
+from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 from asyncenv.api.wt.wt_pb2 import ActionData, RLAIData, RLVector3D
@@ -11,16 +11,18 @@ DIRECTION_NUM = 4
 ACT_N = 30
 
 
-def encode_act(prev_obs: Tuple[RLAIData, List[RLAIData]], act: ActionData) -> Any:
+def encode_act(prev_obs: Tuple[RLAIData, List[RLAIData]], act: ActionData) -> Dict[str, np.ndarray]:
     prev_self_obs = prev_obs[0] if prev_obs is not None else None
 
     encoded_action_id = encode_action_id(act.ActionID)
     encoded_move_direction = encode_move_direction(prev_self_obs, act)
     encoded_control_direction = encode_control_direction(prev_self_obs, act)
-    encoded_act = encoded_action_id + encoded_move_direction + encoded_control_direction
 
-    assert len(encoded_act) == (ACT_N - ACTION_NUM + 1)
-    return encoded_act
+    return dict(
+        action_id=encoded_action_id,
+        move_dir=encoded_move_direction,
+        control_dir=encoded_control_direction,
+    )
 
 
 def decode_act(prev_obs: Tuple[RLAIData, List[RLAIData]], data: List[float]) -> ActionData:
@@ -39,11 +41,10 @@ def decode_act(prev_obs: Tuple[RLAIData, List[RLAIData]], data: List[float]) -> 
     )
 
 
-def encode_action_id(action_ids: Sequence[int32]) -> List[float]:
-    """1"""
+def encode_action_id(action_ids: Sequence[int32]) -> np.ndarray:
     action_id = action_ids[0] if len(action_ids) > 0 else 0
     assert 0 <= action_id < ACTION_NUM
-    return [action_id]
+    return np.array([action_id])
 
 
 def decode_action_id(data: List[float]) -> int32:
@@ -52,27 +53,25 @@ def decode_action_id(data: List[float]) -> int32:
     return int32(action_id)
 
 
-def encode_move_direction(prev_self_obs: RLAIData, act: ActionData) -> List[float]:
-    """4"""
+def encode_move_direction(prev_self_obs: RLAIData, act: ActionData) -> np.ndarray:
     if prev_self_obs is None:
-        return [0.0] * 4
+        return np.zeros(4)
     return encode_vector3d(prev_self_obs.MovingState.MovingVelocity, act.MoveDirection)
 
 
-def decode_move_direction(prev_self_obs: RLAIData, data: List[float]) -> RLVector3D:
+def decode_move_direction(prev_self_obs: RLAIData, data: np.ndarray) -> RLVector3D:
     if prev_self_obs is None:
-        return [0.0] * 4
+        return RLVector3D()
     return decode_vector3d(prev_self_obs.MovingState.MovingVelocity, data)
 
 
-def encode_control_direction(prev_self_obs: RLAIData, act: ActionData) -> List[float]:
-    """4"""
+def encode_control_direction(prev_self_obs: RLAIData, act: ActionData) -> np.ndarray:
     if prev_self_obs is None:
-        return [0.0] * 4
+        return np.zeros(4)
     return encode_vector3d(prev_self_obs.CurrControlDirection, act.ControlDirection)
 
 
-def decode_control_direction(prev_self_obs: RLAIData, data: List[float]) -> RLVector3D:
+def decode_control_direction(prev_self_obs: RLAIData, data: np.ndarray) -> RLVector3D:
     if prev_self_obs is None:
-        return [0.0] * 4
+        return RLVector3D()
     return decode_vector3d(prev_self_obs.CurrControlDirection, data)

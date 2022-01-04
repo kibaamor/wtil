@@ -37,7 +37,7 @@ def process_file(
 
     encoded_obs_list = [obs_encoder(obs) for obs in raw_obs_list]
     encoded_act_list = [
-        act_encoder(raw_obs_list[i - i] if i > 0 else None, raw_act_list[i]) for i in range(len(raw_act_list))
+        act_encoder(raw_obs_list[i - 1] if i > 0 else None, raw_act_list[i]) for i in range(len(raw_act_list))
     ]
 
     encoded_obs_list = torch.tensor(encoded_obs_list, dtype=torch.float)
