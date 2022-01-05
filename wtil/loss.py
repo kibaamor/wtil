@@ -11,7 +11,8 @@ def calc_action(
     target_action = target_action_id[:, -1, :].reshape(-1)
     action_loss = F.cross_entropy(predict_action_probs, target_action)
 
-    predict_action = predict_action_probs.argmax(-1)
+    # predict_action = predict_action_probs.argmax(-1)
+    predict_action = predict_action_probs.multinomial(num_samples=1).squeeze()
     action_matched = (predict_action == target_action).type(torch.float).sum()
     action_accuracy = (action_matched / predict_action.numel()).item()
 
@@ -39,7 +40,7 @@ def calc_dir(
     matched_count = torch.sum(dir_matched * mask)
     dir_accuracy = 1.0
     if total_count > 0:
-        dir_accuracy = matched_count * 1.0 / total_count
+        dir_accuracy = (matched_count * 1.0 / total_count).item()
 
     return dir_loss, dir_accuracy
 

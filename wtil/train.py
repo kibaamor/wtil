@@ -10,7 +10,6 @@ import numpy as np
 import torch
 import tqdm
 from sklearn.model_selection import KFold
-from torch import nn
 from torch.utils.data import DataLoader
 from torch.utils.data.dataset import Dataset, Subset
 from torch.utils.tensorboard import SummaryWriter
@@ -44,7 +43,7 @@ def test(
     writer: SummaryWriter,
     prefix: str,
     dataset: Dataset,
-    model: nn.Module,
+    model: Model,
     dir_mask: Dict[str, torch.Tensor],
     criterion: Callable[[Any, Any, Any], dict],
     batch_size: int,
@@ -79,7 +78,7 @@ def test(
 def train(
     global_step: int,
     writer: SummaryWriter,
-    model: nn.Module,
+    model: Model,
     dir_mask: Dict[str, torch.Tensor],
     criterion: Callable[[Any, Any, Any], dict],
     optimizer: torch.optim.Optimizer,
@@ -102,6 +101,8 @@ def train(
                 loss = sum(loss.values())
                 loss.backward()
                 optimizer.step()
+
+            model.log(writer, global_step)
 
             model.train(False)
             loss, accuracy = test(
@@ -127,7 +128,7 @@ def cross_valid(
     global_step: int,
     writer: SummaryWriter,
     k_fold: int,
-    model: nn.Module,
+    model: Model,
     dir_mask: Dict[str, torch.Tensor],
     criterion: Callable[[Any, Any], dict],
     optimizer: torch.optim.Optimizer,
@@ -195,10 +196,10 @@ def get_best_checkpoint() -> str:
 
     score_list = []
     for filename in filename_list:
-        score_str = filename.split("_")[1][: len(".pth") + 1]
+        score_str = filename.split("_")[1][: -len(".pth")]
         score_val = float(score_str)
         score_list.append((score_val, score_str))
-    best_score = max(score_list, key=lambda v: v[0])[1]
+    best_score = max(score_list, key=lambda v: v[0])
 
     BEST_ACCURACY = best_score[0]
     return f"{CHECKPOINTS_DIR}/wtil_{best_score[1]}.pth"
@@ -219,8 +220,8 @@ def main():
 
     model.to(USE_DEVICE)
 
-    batch_size = 128
-    seq_len = 30
+    batch_size = 256
+    seq_len = 16
     k_fold = 10
     dir_dataset = process_data(seq_len=seq_len)
     num_epochs = 10

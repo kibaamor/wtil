@@ -19,8 +19,23 @@ setup(
     keywords="wtil",
     packages=find_packages(),
     python_requires=">=3.7",
-    install_requires=["grpcio", "protobuf", "torch", "colorlog", "numpy", "pyrr"],
+    install_requires=[
+        "grpcio",
+        "protobuf",
+        "torch",
+        "colorlog",
+        "numpy",
+        "tqdm",
+        "sklearn",
+        "tensorboard",
+    ],
     extras_require={
-        "dev": ["pre-commit", "black", "flake8", "nose", "grpcio-tools"],
+        "dev": [
+            "pre-commit",
+            "black",
+            "flake8",
+            "nose",
+            "grpcio-tools",
+        ],
     },
 )

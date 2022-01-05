@@ -15,9 +15,10 @@ from wtil.process.act import encode_act
 from wtil.process.obs import encode_obs, process_obs
 from wtil.utils.logger import config_logger
 
-DEFAULT_PATHNAME = str(pathlib.Path(__file__).parent / "data")
+WORKING_DIR = pathlib.Path(__file__).parent.parent
+DEFAULT_PATHNAME = str(WORKING_DIR / "data")
 DEFAULT_FILEEXT = ".txt"
-DEFAULT_OUTDIR = str(pathlib.Path(__file__).parent / "data_processed")
+DEFAULT_OUTDIR = str(WORKING_DIR / "data_processed")
 DEFAULT_NUM = 4096
 
 parser = argparse.ArgumentParser(
@@ -52,7 +53,7 @@ def process_batch(outdir: str, basename: str, index: int, batch: Sequence[Tuple[
 
     data_batch = dict(obs=obs_batch, act=act_batch)
 
-    filename = f"{outdir}/{basename}-{index}.npy"
+    filename = f"{outdir}/{basename}-{index}-{len(obs_list)}.npy"
     np.save(filename, data_batch)
     logging.info(f"save {filename} success")
 
@@ -61,7 +62,7 @@ def process_file(filename: str, outdir: str, num: int):
 
     logging.info(f"filename: {filename}, outdir:{outdir}")
 
-    basename = os.path.basename(filename)
+    basename = os.path.splitext(os.path.basename(filename))[0]
 
     with open(filename, "r") as f:
         line_count = 0
@@ -81,6 +82,7 @@ def process_file(filename: str, outdir: str, num: int):
                 batch = []
 
         if len(batch) > 0:
+            batch_index += 1
             process_batch(outdir, basename, batch_index, batch)
 
 

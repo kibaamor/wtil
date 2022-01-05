@@ -2,6 +2,7 @@ from typing import Callable, List, Optional
 
 import torch
 from torch import nn
+from torch.utils.tensorboard import SummaryWriter
 
 from wtil.process.act import ACT_N, ACTION_NUM, DIRECTION_NUM
 from wtil.process.obs import DEPTH_MAP_SHAPE, ENCODE_DATA_LENGTH, ENCODE_OPPO_DATA_LENGTH
@@ -74,6 +75,11 @@ class Model(nn.Module):
             batch_first=True,
         )
         self.fc = mlp([1024, 512, ACT_N], activation=nn.ReLU)
+
+    def log(self, writer: SummaryWriter, global_step: int):
+        for name, param in self.named_parameters():
+            writer.add_histogram(tag=name + "_grad", values=param.grad, global_step=global_step)
+            writer.add_histogram(tag=name + "_data", values=param.data, global_step=global_step)
 
     def forward(self, obs_batch):
         data = obs_batch["data"].type(torch.float)

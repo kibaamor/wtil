@@ -22,7 +22,7 @@ USE_DEVICE = "cuda" if USE_CUDA else "cpu"
 MODEL = None
 PTH = "/home/k/repos/wtil/checkpoints/wtil_0.97461.pth"
 
-SEQ_LEN = 30
+SEQ_LEN = 16
 PREV_PROCESSED_OBS_LIST = None
 CURR_PROCESSED_OBS_LIST = None
 ENCODED_OBS_LIST_DEQUE = deque(maxlen=SEQ_LEN)
