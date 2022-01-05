@@ -1,6 +1,7 @@
 __pycache__
 *.log
 *.egg-info
-wtil/data/*
-*.tfevents.*
+data
 data_processed
+checkpoints
+tensorboard

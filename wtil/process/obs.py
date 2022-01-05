@@ -221,6 +221,9 @@ def encode_depth_map(data: RLAIData) -> np.ndarray:
     height = depth_map.ScreenHeight
     width = depth_map.ScreenWidth
 
+    if len(depth_map.ScreenPixelString) == 0:
+        return np.zeros(DEPTH_MAP_SHAPE)
+
     data = np.array(re.split(",|\|", depth_map.ScreenPixelString), dtype=np.int)  # noqa: W605
     hits = data[::2].reshape(height, width)
     distances = data[1::2].reshape(height, width)

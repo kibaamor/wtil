@@ -101,8 +101,17 @@ class Model(nn.Module):
 
         dir_list = torch.tanh(encoded_fc[:, ACTION_NUM:])
 
+        move_dir = dir_list[:, :DIRECTION_NUM]
+        control_dir = dir_list[:, DIRECTION_NUM:]
+
+        move_dir_norm = move_dir.norm(dim=-1, keepdim=True)
+        control_dir_norm = control_dir.norm(dim=-1, keepdim=True)
+
+        normalized_move_dir = move_dir / move_dir_norm
+        normalized_control_dir = control_dir / control_dir_norm
+
         return dict(
             action_probs=action_probs,
-            move_dir=dir_list[:, :DIRECTION_NUM],
-            control_dir=dir_list[:, DIRECTION_NUM:],
+            move_dir=normalized_move_dir,
+            control_dir=normalized_control_dir,
         )

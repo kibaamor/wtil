@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import glob
 import logging
 import os
 import pathlib
@@ -20,12 +21,17 @@ from wtil.model import Model
 from wtil.process.mask import get_control_dir_mask_array, get_move_dir_mask_array
 from wtil.utils.logger import config_logger
 
-USE_CUDA = True  # torch.cuda.is_available()
+USE_CUDA = torch.cuda.is_available()
 USE_DEVICE = "cuda" if USE_CUDA else "cpu"
 BEST_ACCURACY = 0.0
 
+WORKING_DIR = pathlib.Path(__file__).parent.parent
+DATA_DIR = str(WORKING_DIR / "data_processed")
+CHECKPOINTS_DIR = str(WORKING_DIR / "checkpoints")
+TENSORBOARD_DIR = str(WORKING_DIR / "tensorboard")
 
-def process_data(data_dir=pathlib.Path(__file__).parent / "data_processed", seq_len=8):
+
+def process_data(data_dir=DATA_DIR, seq_len=8):
     return NpyDirDataset(path_glob=f"{data_dir}/*.npy", seq_len=seq_len)
 
 
@@ -167,18 +173,51 @@ def cross_valid(
                 batch_size=batch_size,
             )
 
-            logging.info(f"test accuracy: {test_accuracy}, best accuracy:{BEST_ACCURACY}")
+            logging.info(f"test accuracy: {test_accuracy:0.5f}, best accuracy:{BEST_ACCURACY:0.5f}")
             if test_accuracy > BEST_ACCURACY:
                 BEST_ACCURACY = test_accuracy
-                model.train(False)
-                torch.save(model.state_dict(), f"wtil_{test_accuracy:.3f}.pth")
+                model.to("cpu")
+                torch.save(model.state_dict(), f"{CHECKPOINTS_DIR}/wtil_{test_accuracy:.5f}.pth")
+                model.to(USE_DEVICE)
 
     return global_step
+
+
+def get_best_checkpoint() -> str:
+
+    global BEST_ACCURACY
+
+    filename_list = glob.glob(f"{CHECKPOINTS_DIR}/wtil_*.pth")
+    logging.debug(f"checkpoints: {filename_list}")
+
+    if len(filename_list) == 0:
+        return ""
+
+    score_list = []
+    for filename in filename_list:
+        score_str = filename.split("_")[1][: len(".pth") + 1]
+        score_val = float(score_str)
+        score_list.append((score_val, score_str))
+    best_score = max(score_list, key=lambda v: v[0])[1]
+
+    BEST_ACCURACY = best_score[0]
+    return f"{CHECKPOINTS_DIR}/wtil_{best_score[1]}.pth"
 
 
 def main():
 
     config_logger(False, False, None)
+
+    os.makedirs(CHECKPOINTS_DIR, exist_ok=True)
+
+    model = Model()
+
+    pth = get_best_checkpoint()
+    if len(pth) > 0:
+        logging.info(f"load model from file: {pth}")
+        model.load_state_dict(torch.load(pth))
+
+    model.to(USE_DEVICE)
 
     batch_size = 128
     seq_len = 30
@@ -189,20 +228,16 @@ def main():
     lr = 1e-3
 
     global_step = 0
-    writer = SummaryWriter("./tb")
-    model = Model().to(USE_DEVICE)
+    writer = SummaryWriter(TENSORBOARD_DIR)
     criterion = calc_loss
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
+    move_dir_mask = torch.from_numpy(get_move_dir_mask_array()).type(torch.long).to(USE_DEVICE)
+    control_dir_mask = torch.from_numpy(get_control_dir_mask_array()).type(torch.long).to(USE_DEVICE)
     dir_mask = dict(
-        move_dir=torch.from_numpy(get_move_dir_mask_array()).type(torch.long).to(USE_DEVICE),
-        control_dir=torch.from_numpy(get_control_dir_mask_array()).type(torch.long).to(USE_DEVICE),
+        move_dir=move_dir_mask,
+        control_dir=control_dir_mask,
     )
-
-    pth = ""
-    if len(pth) > 0:
-        logging.info(f"load model from file: {pth}")
-        model.load_state_dict(torch.load(pth))
 
     for i in range(iters):
 

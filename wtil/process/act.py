@@ -25,14 +25,12 @@ def encode_act(prev_obs: Tuple[RLAIData, List[RLAIData]], act: ActionData) -> Di
     )
 
 
-def decode_act(prev_obs: Tuple[RLAIData, List[RLAIData]], data: List[float]) -> ActionData:
-    assert len(data) == ACT_N
-
+def decode_act(prev_obs: Tuple[RLAIData, List[RLAIData]], data: Dict[str, np.ndarray]) -> ActionData:
     prev_self_obs = prev_obs[0] if prev_obs is not None else None
 
-    action_id = decode_action_id(data[:ACTION_NUM])
-    move_direction = decode_move_direction(prev_self_obs, data[ACTION_NUM : ACTION_NUM + DIRECTION_NUM])
-    control_direction = decode_control_direction(prev_self_obs, data[ACTION_NUM + DIRECTION_NUM :])
+    action_id = decode_action_id(data["action_probs"])
+    move_direction = decode_move_direction(prev_self_obs, data["move_dir"])
+    control_direction = decode_control_direction(prev_self_obs, data["control_dir"])
     return ActionData(
         ActionID=[action_id],
         EpisodeId=prev_self_obs.EpisodeId,

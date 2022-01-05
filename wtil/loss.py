@@ -25,8 +25,6 @@ def calc_dir(
     dir_mask: torch.Tensor,
 ) -> Tuple[torch.Tensor, float]:
 
-    predict_norm = predict_dir.norm(dim=-1, keepdim=True)
-    predict_dir = predict_dir / predict_norm
     target_dir = target_dir[:, -1:, :].reshape(target_dir.shape[0], -1)
     mask = dir_mask[predict_action]
 
