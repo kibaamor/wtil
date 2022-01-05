@@ -17,7 +17,7 @@ from asyncenv.api.wt.wt_pb2 import (
     VirtualDepthMapSimple,
 )
 
-from wtil.process.utils import encode_bool, encode_onehot, encode_ratio, vector3d_to_numpy
+from wtil.process.utils import encode_bool, encode_onehot, encode_ratio, encode_vector3d
 
 MAX_ENCODED_HEALTH_LENGTH = 100
 MAX_ENCODED_STAMINA_LENGTH = 100
@@ -95,9 +95,9 @@ def encode_data(data: RLAIData) -> np.ndarray:
     encoded_health = encode_ratio(data.CurrHealth / data.MaxHealth, MAX_ENCODED_HEALTH_LENGTH)
     encoded_stamina = encode_ratio(data.CurrStamina / MAX_STAMINA, MAX_ENCODED_STAMINA_LENGTH)
     encoded_health_potion = encode_ratio(data.HealthPotion / MAX_HEALTH_POTION, MAX_ENCODED_HEALTH_POTION_LENGTH)
-    encoded_location = vector3d_to_numpy(data.CurrLocation)
-    encoded_face_dir = vector3d_to_numpy(data.CurrFaceDirection)
-    encoded_control_dir = vector3d_to_numpy(data.CurrControlDirection)
+    encoded_location = encode_vector3d(data.CurrLocation)
+    encoded_face_dir = encode_vector3d(data.CurrFaceDirection)
+    encoded_control_dir = encode_vector3d(data.CurrControlDirection)
     encoded_moving_state = encode_moving_state(data.MovingState)
     encoded_action_state = encode_action_state(data.ActionState)
 
@@ -143,7 +143,7 @@ def encode_weapon(weapon: RLRangedWeapon) -> np.ndarray:
 def encode_moving_state(moving_state: RLMovingState) -> np.ndarray:
     assert len(MOVING_STATE) == 8
     encoded_cur_state = encode_onehot(moving_state.CurrState, MOVING_STATE)
-    encoded_moving_velocity = vector3d_to_numpy(moving_state.MovingVelocity)
+    encoded_moving_velocity = encode_vector3d(moving_state.MovingVelocity)
     return np.concatenate(
         [
             encoded_cur_state,
@@ -206,8 +206,8 @@ def encode_charge_attack_time(cat: RLChargeAttackTime) -> np.ndarray:
 
 
 def encode_projectile(projectile: NearestProjectileActor) -> np.ndarray:
-    encoded_location = vector3d_to_numpy(projectile.Location)
-    encoded_velocity = vector3d_to_numpy(projectile.Velocity)
+    encoded_location = encode_vector3d(projectile.Location)
+    encoded_velocity = encode_vector3d(projectile.Velocity)
     return np.concatenate(
         [
             encoded_location,

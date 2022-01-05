@@ -4,11 +4,11 @@ import numpy as np
 from asyncenv.api.wt.wt_pb2 import ActionData, RLAIData, RLVector3D
 from numpy import int32
 
-from wtil.process.utils import decode_vector3d, encode_vector3d
+from wtil.process.utils import unit_vector
 
 ACTION_NUM = 22
-DIRECTION_NUM = 4
-ACT_N = 30
+DIRECTION_NUM = 3
+ACT_N = 28
 
 
 def encode_act(prev_obs: Tuple[RLAIData, List[RLAIData]], act: ActionData) -> Dict[str, np.ndarray]:
@@ -54,24 +54,18 @@ def decode_action_id(data: List[float]) -> int32:
 
 
 def encode_move_direction(prev_self_obs: RLAIData, act: ActionData) -> np.ndarray:
-    if prev_self_obs is None:
-        return np.zeros(4)
-    return encode_vector3d(prev_self_obs.MovingState.MovingVelocity, act.MoveDirection)
+    dir = act.MoveDirection
+    return unit_vector(np.array([dir.X, dir.Y, dir.Z]))
 
 
 def decode_move_direction(prev_self_obs: RLAIData, data: np.ndarray) -> RLVector3D:
-    if prev_self_obs is None:
-        return RLVector3D()
-    return decode_vector3d(prev_self_obs.MovingState.MovingVelocity, data)
+    return RLVector3D(X=data[0], Y=data[1], Z=data[2])
 
 
 def encode_control_direction(prev_self_obs: RLAIData, act: ActionData) -> np.ndarray:
-    if prev_self_obs is None:
-        return np.zeros(4)
-    return encode_vector3d(prev_self_obs.CurrControlDirection, act.ControlDirection)
+    dir = act.ControlDirection
+    return unit_vector(np.array([dir.X, dir.Y, dir.Z]))
 
 
 def decode_control_direction(prev_self_obs: RLAIData, data: np.ndarray) -> RLVector3D:
-    if prev_self_obs is None:
-        return RLVector3D()
-    return decode_vector3d(prev_self_obs.CurrControlDirection, data)
+    return RLVector3D(X=data[0], Y=data[1], Z=data[2])

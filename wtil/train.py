@@ -20,7 +20,7 @@ from wtil.model import Model
 from wtil.process.mask import get_control_dir_mask_array, get_move_dir_mask_array
 from wtil.utils.logger import config_logger
 
-USE_CUDA = False  # torch.cuda.is_available()
+USE_CUDA = True  # torch.cuda.is_available()
 USE_DEVICE = "cuda" if USE_CUDA else "cpu"
 BEST_ACCURACY = 0.0
 
@@ -55,7 +55,7 @@ def test(
 
             loss, accuracy = criterion(model(features), labels, dir_mask)
             for k, v in loss.items():
-                losses[k].append(v)
+                losses[k].append(v.item())
             for k, v in accuracy.items():
                 accuracies[k].append(v)
 
@@ -64,8 +64,8 @@ def test(
     for k, v in accuracies.items():
         writer.add_scalar(f"{prefix}_accuracy/{k}", np.mean(v), global_step=global_step)
 
-    avg_loss = np.array(np.array(list(losses.values()))).sum(axis=0).mean()
-    avg_accuracy = np.array(np.array(list(accuracies.values()))).sum(axis=0).mean()
+    avg_loss = np.array(list(losses.values())).mean()
+    avg_accuracy = np.array(list(accuracies.values())).mean()
 
     return avg_loss, avg_accuracy
 
@@ -92,7 +92,8 @@ def train(
                 labels = to_device(labels, USE_DEVICE)
 
                 optimizer.zero_grad()
-                loss = sum(criterion(model(features), labels, dir_mask)[0].values())
+                loss, _ = criterion(model(features), labels, dir_mask)
+                loss = sum(loss.values())
                 loss.backward()
                 optimizer.step()
 
