@@ -10,6 +10,7 @@ import numpy as np
 from asyncenv.api.wt.wt_pb2 import PlayerObservationData, RLVector3D
 from google.protobuf.json_format import Parse
 
+from wtil.process.obs import process_obs
 from wtil.utils.logger import config_logger
 
 WORKING_DIR = pathlib.Path(__file__).parent.parent
@@ -33,6 +34,8 @@ def process_file(filename: str):
 
     logging.info(f"filename: {filename}")
 
+    valid_act_len_stat = defaultdict(int)
+
     act_id_stat = defaultdict(int)
     act_len_stat = defaultdict(int)
     act_id_len_stat = defaultdict(int)
@@ -42,8 +45,12 @@ def process_file(filename: str):
     with open(filename, "r") as f:
         for line in f:
             obs_act = Parse(line, PlayerObservationData())
-            act_list = obs_act.ActionDataArray
 
+            obs_data = obs_act.ObsData
+            self_aidata, _ = process_obs(obs_data)
+            valid_act_len_stat[len(self_aidata.ValidActions)] += 1
+
+            act_list = obs_act.ActionDataArray
             act_len_stat[len(act_list)] += 1
 
             for act in act_list:
@@ -56,6 +63,8 @@ def process_file(filename: str):
                     act_id_stat[act_id] += 1
                     act_id_with_move_dir[act_id] += has_move_dir
                     act_id_with_control_dir[act_id] += has_control_dir
+
+    logging.info(f"valid_act_len_stat: {valid_act_len_stat}")
 
     logging.info(f"act_id_stat: {act_id_stat}")
     logging.info(f"act_len_stat: {act_len_stat}")
