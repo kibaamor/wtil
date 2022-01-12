@@ -42,8 +42,12 @@ def process_file(filename: str):
     act_id_with_move_dir = defaultdict(int)
     act_id_with_control_dir = defaultdict(int)
 
+    record_num = 0
+
     with open(filename, "r") as f:
         for line in f:
+            record_num += 1
+
             obs_act = Parse(line, PlayerObservationData())
 
             obs_data = obs_act.ObsData
@@ -63,6 +67,8 @@ def process_file(filename: str):
                     act_id_stat[act_id] += 1
                     act_id_with_move_dir[act_id] += has_move_dir
                     act_id_with_control_dir[act_id] += has_control_dir
+
+    logging.info(f"record_num: {record_num}")
 
     logging.info(f"valid_act_len_stat: {valid_act_len_stat}")
 

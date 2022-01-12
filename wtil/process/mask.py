@@ -4,12 +4,12 @@ from wtil.process.act import ACTION_NUM
 
 
 def get_move_dir_mask(action_id: int) -> int:
-    db = [1, 5, 17, 19, 20]
+    db = [1]
     return 1 if action_id in db else 0
 
 
 def get_control_dir_mask(action_id: int) -> int:
-    db = [2, 6, 7]
+    db = [2]
     return 1 if action_id in db else 0
 
 
